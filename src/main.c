@@ -38,9 +38,10 @@ ISR(INT0_vect) {
     evt = b1_evt;  
 }
 
-void delay_ms(uint16_t ms) {
-    while (ms--) {
+void delay_ms(uint8_t ms) {
+    while (ms > 0) {
         _delay_ms(1); // Calls _delay_ms with a constant value
+        ms--;
     }
 }
 
@@ -121,7 +122,7 @@ void do_state_1(void) {
     set_rgb_led(255, 128, 20); 
 }
 
-const state_t state0 = {0, enter_state_0, do_state_0, do_nothing, 1000};
+const state_t state0 = {0, enter_state_0, do_state_0, do_nothing, 10};
 const state_t state1 = {1, enter_state_1, do_state_1, do_nothing, 500};
 
 const state_t* state_table[3][2] = {
