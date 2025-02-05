@@ -2,23 +2,18 @@
 #include <avr/interrupt.h>
 #include <util/delay.h>
 
-#define F_CPU 16000000UL
-#define BUTTON_DEBOUNCE_DELAY_MS 50
-#define EVENT_QUEUE_LENGTH 10
+#include <lcd.h>
 
 // Define GPIO Pins (ATmega328)
-#define LED_RED   PB1  // Pin 9
-#define LED_GREEN PB2  // Pin 10
-#define LED_BLUE  PB3  // Pin 11
-#define BTN1      PD2  // Pin 2
-#define BTN2      PD3  // Pin 3
-#define BTN3      PD4  // Pin 4
+#define LED_GREEN   PB1  // Pin 9
+#define LED_RED     PB2  // Pin 10
+#define LED_BLUE    PB3  // Pin 11
 
-volatile uint8_t bit_mask = 0b0001;
-volatile uint8_t bit_mask_on = 0b1111;
-volatile uint8_t bit_mask_off = 0b0000;
-volatile uint8_t button_time = 0;
-volatile uint8_t event_flag = 0;
+// Buttons
+#define BTN         PD3  // Pin 0
+
+// Inputs
+#define FREQ        PD0
 
 /* Function pointer primitive */ 
 typedef void (*state_func_t)(void);
@@ -33,105 +28,154 @@ typedef struct {
 
 typedef enum {
     b1_evt = 0,
-    b2_evt = 1,
-    b3_evt = 2,
-    no_evt = 3
+    no_evt = 1
 } event_t;
 
 volatile event_t evt = no_evt;
 
-/* PWM LED Fade Effect */
-void setup_pwm() {
-    TCCR1A = (1 << COM1A1) | (1 << WGM11);  // Fast PWM, non-inverting
-    TCCR1B = (1 << WGM13) | (1 << WGM12) | (1 << CS11);  // Prescaler 8
-    ICR1 = 255;  // Max count for 8-bit resolution
-    OCR1A = 0;   // Initial duty cycle
+void delay_ms(uint16_t ms) {
+    while (ms--) {
+        _delay_ms(1); // Calls _delay_ms with a constant value
+    }
 }
 
 /* Button Interrupts */
-ISR(INT0_vect) { evt = b1_evt; }
-ISR(INT1_vect) { evt = b2_evt; }
-ISR(PCINT2_vect) { evt = b3_evt; }
+ISR(INT0_vect) {
+    evt = b1_evt;
+}
+
+void set_rgb_led(uint8_t r, uint8_t g, uint8_t b) {
+    // PWM range (0 -> 255)
+    OCR1B = r; // PB2 (LED_RED)
+    OCR1A = g; // PB1 (LED_GREEN)
+    OCR2A = b; // PB3 (LED_BLUE)
+}
 
 /* GPIO & Interrupt Setup */
-void setup() {
+void init() {
+    // Set up ADC for frequency input
+    ADMUX  = ( 0 << REFS1 ) | ( 1 << REFS0 )
+         | ( 0 << ADLAR )
+         | ( 0 << MUX3 )  | ( 1 << MUX2 )
+         | ( 0 << MUX1 )  | ( 1 << MUX0 );
+    ADCSRA = ( 1 << ADEN )  | ( 1 << ADSC )
+         | ( 0 << ADATE ) | ( 0 << ADIF )  | ( 0 << ADIE )
+         | ( 0 << ADPS2 ) | ( 1 << ADPS1 ) | ( 1 << ADPS0 );
+
     // Set LEDs as outputs
     DDRB |= (1 << LED_RED) | (1 << LED_GREEN) | (1 << LED_BLUE);
 
-    // Set buttons as inputs with pull-ups
-    DDRD &= ~((1 << BTN1) | (1 << BTN2) | (1 << BTN3));
-    PORTD |= (1 << BTN1) | (1 << BTN2) | (1 << BTN3);
+    // setting up TIMER0
+    TCCR0A = (0 << COM0A1) | (0 << COM0A0) | (0 << COM0B1) | (0 << COM0B0)
+            | (0 << WGM01)  | (0 << WGM00);
+    TCCR0B = (0 << WGM02)  | (0 << CS02)   | (1 << CS01)   | (0 << CS00);
+    TIMSK0 = (0 << OCIE0B) | (0 << OCIE0A) | (1 << TOIE0);
+    
+    // Configure Timer1 for Fast PWM on OC1A (PB1) and OC1B (PB2)
+    TCCR1A = (1 << WGM11) | (1 << COM1A1) | (1 << COM1B1); // Fast PWM, clear on compare match
+    TCCR1B = (1 << WGM12) | (1 << WGM13) | (1 << CS10);    // No prescaling
+    ICR1 = 0xFF; // Set top value for 8-bit resolution
 
-    // Enable external interrupts for buttons
-    EIMSK |= (1 << INT0) | (1 << INT1);  // Enable INT0, INT1
-    EICRA |= (1 << ISC01) | (1 << ISC11);  // Falling edge
+    // Configure Timer2 for Fast PWM on OC2A (PB3)
+    TCCR2A = (1 << WGM20) | (1 << WGM21) | (1 << COM2A1); // Fast PWM, clear on compare match
+    TCCR2B = (1 << CS20);                                 // No prescaling
 
-    PCICR |= (1 << PCIE2);
-    PCMSK2 |= (1 << PCINT20);
+    // Initialize duty cycles to 0
+    OCR1A = 0; // PB1 (LED_GREEN)
+    OCR1B = 0; // PB2 (LED_RED)
+    OCR2A = 0; // PB3 (LED_BLUE)
 
-    setup_pwm();
+    // Configure button interrupt
+    EICRA = (1 << ISC01) | (1 << ISC00);  // Falling edge of INT0 generates interrupt request
+    EIMSK = (1 << INT0);  // Enable INT0
+
+    DDRD &= ~(1 << BTN);  // Set BTN as input
+    PORTD |= (1 << BTN);  // Enable pull-up resistor
+
+    lcd_init(LCD_DISP_ON);  // Initialize LCD
+    lcd_clrscr();
     sei();  // Enable global interrupts
 }
 
 /* State Machine Functions */
-void leds_off() {
-    PORTB &= ~(1 << LED_RED | 1 << LED_GREEN | 1 << LED_BLUE);
-}
-
-void leds_on() {
-    PORTB |= (1 << LED_RED | 1 << LED_GREEN | 1 << LED_BLUE);
+void reset() {
+    OCR1A = 0; // PB1 (LED_GREEN)
+    OCR1B = 0; // PB2 (LED_RED)
+    OCR2A = 0; // PB3 (LED_BLUE)
+    lcd_clrscr(); // Clear LCD
 }
 
 void do_nothing(void) { return; }
 
+void enter_state_0(void) {
+    reset();
+
+    lcd_gotoxy(0, 0);
+    lcd_puts("Ready to scan?");
+
+    lcd_gotoxy(0, 1);
+    lcd_puts("Press btn (S2)");
+
+    set_rgb_led(64, 224, 208); // Turquoise
+}
+
 void do_state_0(void) {
-    bit_mask = (bit_mask << 1) | (bit_mask >> 3);
-    PORTB = (PORTB & 0b11110000) | bit_mask;
+    return;
+}
+
+void enter_state_1(void) {
+    reset();
 }
 
 void do_state_1(void) {
-    PORTB ^= (1 << LED_RED | 1 << LED_GREEN | 1 << LED_BLUE);
-} 
+    static uint8_t dot_count = 0; // Track the number of dots
+    
+    // Update the LCD
+    lcd_clrscr();
+    lcd_gotoxy(0, 0);
+    lcd_puts("Scanning"); // Base text
+
+    for (uint8_t i = 0; i < dot_count; i++) {
+        lcd_putc('.'); // Add dots dynamically
+    }
+
+    dot_count = (dot_count + 1) % 4; // Cycle through 0, 1, 2, 3
+}
+
+
+void enter_state_2(void) {
+    reset();
+    lcd_gotoxy(0, 0);
+    lcd_puts("Hello world (B)");
+}
 
 void do_state_2(void) {
-    bit_mask = (bit_mask >> 1) | (bit_mask << 3);
-    PORTB = (PORTB & 0b11110000) | bit_mask;
+    return;
 }
 
-void enter_state_3(void) {
-    leds_off();
-    DDRB |= (1 << LED_RED);
-    TCCR1A |= (1 << COM1A1);
-}
+const state_t state0 = {0, enter_state_0, do_state_0, do_nothing, 100};
+const state_t state1 = {1, enter_state_1, do_state_1, do_nothing, 500};
+const state_t state2 = {2, enter_state_2, do_state_2, do_nothing, 100};
 
-void exit_state_3(void) {
-    TCCR1A &= ~(1 << COM1A1);
-    leds_off();
-}
-
-const state_t state0 = {0, do_nothing, do_state_0, do_nothing, 200};
-const state_t state1 = {1, do_nothing, do_state_1, do_nothing, 100};
-const state_t state2 = {2, do_nothing, do_state_2, do_nothing, 100};
-const state_t state3 = {3, enter_state_3, do_nothing, exit_state_3, 10};
-
-const state_t* state_table[4][4] = {
-    /* STATE  GPIO20   GPIO21   GPIO22   NO_EVT */
-    {/* S0 */ &state2, &state1, &state3, &state0},
-    {/* S1 */ &state0, &state2, &state3, &state1},
-    {/* S2 */ &state1, &state0, &state3, &state2},
-    {/* S3 */ &state0, &state0, &state0, &state3}
+const state_t* state_table[3][2] = {
+    /* STATE  PD0      NO_EVT */
+    {/* S0 */ &state1, &state0},
+    {/* S1 */ &state2, &state1},
+    {/* S2 */ &state0, &state2}
 };
 
 int main() {
-    setup();
+    init();
 
     const state_t* current_state = state_table[0][no_evt];
+    evt = no_evt;
 
     while (1) {
         current_state->Enter();
-        while (current_state->id == state_table[current_state->id][evt]->id) {
+        while (current_state->id == state_table[current_state->id][evt]->id) 
+        {
             current_state->Do();
-            _delay_ms(current_state->delay_ms);
+            delay_ms(current_state->delay_ms);
         }
         current_state->Exit();
         current_state = state_table[current_state->id][evt];
