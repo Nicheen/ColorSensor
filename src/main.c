@@ -226,14 +226,14 @@ void enter_state_0(void) {
 }
 
 void do_state_0(void) {
-    set_rgb_leds(128, 0, 0); 
+    set_rgb_leds(255, 0, 0); 
 }
 
 void enter_state_1(void) {
     reset();
     enable_TCS34725();
     // For a visual cue, set a fixed color on LED1 (or both)
-    set_rgb_leds(0, 128, 0);
+    set_rgb_leds(255, 0, 0);
     PORTD |= (1 << SENSOR_LED);
 }
 
