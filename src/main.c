@@ -221,13 +221,14 @@ void enter_state_0(void) {
 }
 
 void do_state_0(void) {
-    set_rgb_led(255, 0, 0); 
+    set_rgb_led(128, 0, 0); 
 }
 
 void enter_state_1(void) {
     reset();
     enable_TCS34725();
-
+    // For a visual cue, set a fixed color on LED1 (or both)
+    set_rgb_led(0, 128, 0);
     PORTD |= (1 << SENSOR_LED);
 }
 
@@ -238,10 +239,15 @@ void do_state_1(void) {
     uint16_t r = read_register(0x16);
     uint16_t g = read_register(0x18);
     uint16_t b = read_register(0x1A);
+    
+    // Color spectrum for the photodiode shows that
+    // r = 0.85
+    // g = 0.65
+    // b = 0.57
 
-    uint8_t red   = (uint8_t)((float)(r * 255) / (float)c);
-    uint8_t green = (uint8_t)((float)(g * 255) / (float)c);
-    uint8_t blue  = (uint8_t)((float)(b * 255) / (float)c);
+    uint8_t red   = (uint8_t)((float)(r * 255) / 2000.0);
+    uint8_t green = (uint8_t)((float)(g * 255) / 2000.0);
+    uint8_t blue  = (uint8_t)((float)(b * 255) / 2000.0);
 
     char buffer_1[16];
     char buffer_2[16];
