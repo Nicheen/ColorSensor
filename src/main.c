@@ -103,9 +103,9 @@ void delay_ms(uint16_t ms) {
 
 void set_rgb_led(uint8_t r, uint8_t g, uint8_t b) {
     // Handle Red LED (PB2, OC1B)
-    OCR1A = b; // PB1 (OC1A) --> LED1_RED
+    OCR1A = r; // PB1 (OC1A) --> LED1_RED
     OCR1B = g; // PB2 (OC1B) --> LED1_GREEN
-    OCR2A = r; // PB3 (OC2A) --> LED1_BLUE
+    OCR2A = b; // PB3 (OC2A) --> LED1_BLUE
 }
 
 void init_adc() {
@@ -245,9 +245,9 @@ void do_state_1(void) {
     // g = 0.65
     // b = 0.57
 
-    uint8_t red   = (uint8_t)((float)(r * 255) / 2000.0);
-    uint8_t green = (uint8_t)((float)(g * 255) / 2000.0);
-    uint8_t blue  = (uint8_t)((float)(b * 255) / 2000.0);
+    uint8_t red   = (uint8_t)((float)(r * 255) / (500.0));
+    uint8_t green = (uint8_t)((float)(g * 255) / (500.0));
+    uint8_t blue  = (uint8_t)((float)(b * 255) / (500.0));
 
     char buffer_1[16];
     char buffer_2[16];
