@@ -108,6 +108,42 @@ void set_rgb_led(uint8_t r, uint8_t g, uint8_t b) {
     OCR2A = b; // PB3 (OC2A) --> LED1_BLUE
 }
 
+void set_led_from_color(uint8_t red, uint8_t green, uint8_t blue) {
+    // Threshold to detect when two colors are "close"
+    const uint8_t THRESHOLD = 30; 
+
+    if (red > green && red > blue) {
+        if (green >= red - THRESHOLD) {
+            set_rgb_led(255, 128, 0);  // **Orange**
+        } else if (blue >= red - THRESHOLD) {
+            set_rgb_led(255, 0, 255);  // **Purple**
+        } else {
+            set_rgb_led(255, 0, 0);  // **Red**
+        }
+    } 
+    else if (green > red && green > blue) {
+        if (red >= green - THRESHOLD) {
+            set_rgb_led(255, 255, 0);  // **Yellow**
+        } else if (blue >= green - THRESHOLD) {
+            set_rgb_led(0, 255, 255);  // **Cyan**
+        } else {
+            set_rgb_led(0, 255, 0);  // **Green**
+        }
+    } 
+    else if (blue > red && blue > green) {
+        if (red >= blue - THRESHOLD) {
+            set_rgb_led(255, 0, 255);  // **Purple**
+        } else if (green >= blue - THRESHOLD) {
+            set_rgb_led(0, 255, 255);  // **Cyan**
+        } else {
+            set_rgb_led(0, 0, 255);  // **Blue**
+        }
+    } 
+    else {
+        set_rgb_led(255, 255, 255);  // **White (All values similar)**
+    }
+}
+
 void init_adc() {
     // Set POT (PD1) as input (it's already input by default, just ensuring no conflicts)
     DDRC &= ~(1 << POT);
@@ -180,8 +216,14 @@ void enable_TCS34725() {
 
     // Set integration time to 154 ms (0xC0)
     i2c_start(0x52);
-    i2c_write(0x80 | 0x01); // Command for ATIME register
+    i2c_write(0x80 | 0x01); // ATIME register
     i2c_write(0xC0);        // 0xC0 gives ~154 ms integration time
+    i2c_stop();
+    _delay_ms(10);
+
+    i2c_start(0x52);
+    i2c_write(0x80 | 0x0F); // Control register
+    i2c_write(0x01);        // Set gain to 4x
     i2c_stop();
     _delay_ms(10);
 }
@@ -221,14 +263,14 @@ void enter_state_0(void) {
 }
 
 void do_state_0(void) {
-    set_rgb_led(128, 0, 0); 
+    set_rgb_led(255, 0, 0); 
 }
 
 void enter_state_1(void) {
     reset();
     enable_TCS34725();
     // For a visual cue, set a fixed color on LED1 (or both)
-    set_rgb_led(0, 128, 0);
+    set_rgb_led(0, 255, 0);
     PORTD |= (1 << SENSOR_LED);
 }
 
@@ -241,14 +283,24 @@ void do_state_1(void) {
     uint16_t b = read_register(0x1A);
     
     // Color spectrum for the photodiode shows that
-    // r = 0.85
-    // g = 0.65
-    // b = 0.57
+    const float GREEN_COMP = 1.36;
+    const float BLUE_COMP = 1.58;
 
-    uint8_t red   = (uint8_t)((float)(r * 255) / (500.0));
-    uint8_t green = (uint8_t)((float)(g * 255) / (500.0));
-    uint8_t blue  = (uint8_t)((float)(b * 255) / (500.0));
+    const uint8_t THRESHOLD = 50;
 
+    uint8_t red, green, blue;
+    if (c == 0) {
+        red = 0;
+        green = 0;
+        blue = 0;
+    } else {
+        red   = (uint8_t)(pow(((float)(r) / (float)c), 2.5) * 2.5 * 255.0); // 2
+        green = (uint8_t)(pow(((float)(g) / (float)c), 2.5) * 3 * GREEN_COMP * 255.0); // 5
+        blue  = (uint8_t)(pow(((float)(b) / (float)c), 2.5) * 6 * BLUE_COMP * 255.0); // 4
+        
+    }
+
+    
     char buffer_1[16];
     char buffer_2[16];
 
